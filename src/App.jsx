@@ -30,6 +30,19 @@ const NICHES = [
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
+// --- FUNÇÃO AUXILIAR DO WHATSAPP (EVITA TELA CINZA) ---
+const getWhatsAppLink = (phone, pitch) => {
+  if (!phone || phone === 'não listado') return null;
+  // Remove caracteres não numéricos
+  const cleanPhone = phone.replace(/\D/g, '');
+  if (!cleanPhone) return null;
+  
+  // Garante o código do país se não tiver
+  const formattedPhone = cleanPhone.length <= 11 ? `55${cleanPhone}` : cleanPhone;
+  const encodedText = encodeURIComponent(pitch || '');
+  return `https://api.whatsapp.com/send?phone=${formattedPhone}&text=${encodedText}`;
+};
+
 export default function App() {
   // Estados Globais de Navegação e Dados
   const [currentView, setCurrentView] = useState('dashboard'); 
@@ -229,7 +242,7 @@ export default function App() {
   const handleTunePitchTone = async (campaignId, leadId, currentPitch, command) => {
     if (!command.trim()) return;
     setIsTuningTone(prev => ({ ...prev, [leadId]: true }));
-    const prompt = `Reescreva a mensagem comercial de WhatsApp a seguir de acordo com este comando especial: "${command}". Mensagem Atual: "${currentPitch}" Importante: Mantenha o foco comercial, o nome da empresa se presente, de forma curta e sem emojis de qualquer tipo.`;
+    const prompt = `Reescreva a mensagem comercial de WhatsApp a seguir de acordo com este comando especial: "${command}". Mensagem Atual: "${currentPitch}" Importante: Mantenha o foco comercial, o nome da empresa se presente, de forma corta e sem emojis de qualquer tipo.`;
     try {
       const result = await callGeminiAPI(prompt, false);
       if (result) {
@@ -289,8 +302,8 @@ export default function App() {
       const email = item.email || (item.emails && item.emails[0]) || "não listado";
       const instagram = item.instagram || (item.socialMediaProfiles && item.socialMediaProfiles.instagram) || "não listado";
       
-      // Captura o link exato do Maps (Google Meu Negócio)
-      const mapsUrl = item.url || item.googleMapsUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name+' '+campaignData.location)}`;
+      // Captura correta e blindada do link do GMB vindo do scraper
+      const mapsUrl = item.url || item.googleMapsUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + ' ' + campaignData.location)}`;
 
       const prompt = `Gere uma análise crítica em formato JSON de 2 vulnerabilidades técnicas do site/Maps para a empresa "${name}" em Florianópolis. Crie também uma abordagem direta comercial de 2 parágrafos amigável para enviar por mensagem.`;
 
@@ -298,7 +311,7 @@ export default function App() {
       leads.push({
         id: generateId(), name,
         link: website !== "não listado" && website !== "N/A" ? website : "",
-        mapsUrl: mapsUrl, // Blindagem do link exato do GMB vindo da Apify
+        mapsUrl: mapsUrl, 
         weaknesses: aiData?.weaknesses || [
           { description: "Perfil de negócio desprovido de links de conversão direta ou otimização de palavras-chave", severity: "high" },
           { description: "Ausência de automação de respostas rápidas no perfil local", severity: "medium" }
@@ -373,7 +386,7 @@ export default function App() {
     if (!campaign.leads || campaign.leads.length === 0) return;
     const headers = ['Nome', 'Link/Site', 'Link Maps', 'Status', 'Telefone', 'Email', 'Instagram', 'Pontos Fracos', 'Mensagem Proposta', 'Data Abordagem', 'Data Baixa', 'Valor Contrato', 'Notas'];
     const rows = campaign.leads.map(l => [
-      l.name, l.link, l.status, l.contact_phone, l.contact_email, l.contact_instagram,
+      l.name, l.link, l.mapsUrl || '', l.status, l.contact_phone, l.contact_email, l.contact_instagram,
       l.weaknesses.map(w => `${w.description} (${w.severity})`).join(' | '),
       l.pitch.replace(/"/g, '""'), l.approachDate || '', l.conversionDate || '', l.dealValue || 0, (l.notes || '').replace(/"/g, '""')
     ]);
@@ -387,7 +400,7 @@ export default function App() {
     showToast('Relatório exportado em formato CSV.');
   };
 
-  // --- RENDERIZADORES DE VIEW (RESOLVE PERDA DE FOCO DO INPUT) ---
+  // --- RENDERIZADORES DE VIEW ---
   const renderDashboardView = () => {
     const allLeads = campaigns.flatMap(c => c.leads || []);
     const totalLeads = allLeads.length;
@@ -874,23 +887,6 @@ export default function App() {
     const campaign = campaigns.find(c => c.id === activeCampaignId);
     if (!campaign) return null;
 
-    const getStatusStyle = (status) => {
-      if (status === 'convertido') return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold';
-      if (status === 'contatado') return 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-bold';
-      if (status === 'perdido') return 'bg-rose-500/10 text-rose-400 border border-rose-500/20 font-bold';
-      return 'bg-[#18181B] text-[#9CA3AF] border border-[#27272A] font-bold';
-    };
-
-    const getSeverityBadge = (sev) => {
-      const config = {
-        high: { color: 'bg-rose-500/10 text-rose-500 border border-rose-500/20', label: 'Crítico' },
-        medium: { color: 'bg-amber-500/10 text-amber-500 border border-amber-500/20', label: 'Médio' },
-        low: { color: 'bg-[#18181B] text-slate-300 border border-[#27272A]', label: 'Estável' }
-      };
-      const c = config[sev] || config.low;
-      return <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded-full ${c.color}`}>{c.label}</span>;
-    };
-
     const filteredLeads = (campaign.leads || []).filter(lead => {
       const matchesSearch = lead.name.toLowerCase().includes(campaignSearchTerm.toLowerCase());
       const matchesStatus = campaignStatusFilter === 'todos' || lead.status === campaignStatusFilter;
@@ -971,7 +967,10 @@ export default function App() {
                     <span className="text-xs uppercase font-bold text-slate-500 tracking-wider">Diagnóstico Digital</span>
                     <div className="grid grid-cols-1 gap-2">
                       {(lead.weaknesses || []).map((w, i) => (
-                        <div key={i} className="flex justify-between items-center p-3 bg-[#18181B] border border-[#27272A] rounded-xl text-xs text-slate-300 font-semibold"><span>{w.description}</span>{getSeverityBadge(w.severity)}</div>
+                        <div key={i} className="flex justify-between items-center p-3 bg-[#18181B] border border-[#27272A] rounded-xl text-xs text-slate-300 font-semibold">
+                          <span>{w.description}</span>
+                          <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded-full ${w.severity === 'high' ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : w.severity === 'medium' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-[#18181B] text-slate-300 border border-[#27272A]'}`}>{w.severity === 'high' ? 'Crítico' : w.severity === 'medium' ? 'Médio' : 'Estável'}</span>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -1135,7 +1134,7 @@ export default function App() {
         {currentView === 'campaign' && renderCampaignDetailsView()}
       </main>
       {isProfileModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 z-[100]">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#09090B] border border-[#27272A] rounded-3xl w-full max-w-md p-6 space-y-6 shadow-2xl">
             <div className="flex justify-between items-center border-b border-[#27272A] pb-4">
               <h3 className="text-lg font-bold text-white">Editar Perfil de Administradora</h3>
