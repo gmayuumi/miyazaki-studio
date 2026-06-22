@@ -5,14 +5,14 @@ import {
   ExternalLink, Sparkles, Check, ChevronRight, Globe, Layers, ArrowLeft,
   Download, FileText, Filter, MessageSquare, Edit3, MapPin, Send, RefreshCw, 
   Settings, User, ChevronDown, Building2, HelpCircle, CheckSquare, BarChart, Clipboard, 
-  UserCheck, DollarSign, Target, Calendar, TrendingUp
+  UserCheck, DollarSign, Target, Calendar, TrendingUp, Upload, FileJson
 } from 'lucide-react';
 
 // --- CONFIGURAÇÕES DE IA ---
-const apiKey = ""; // Injetada dinamicamente pelo ambiente
+const apiKey = ""; // Pode colar a sua chave Gemini aqui se desejar IA ativa localmente
 const AI_MODEL = "gemini-2.5-flash-preview-09-2025";
-const APIFY_TOKEN = "apify_api_UDWkQGlrcl4QVGkkPqfOyvlNuGWvcL0pmUJV"; // Token Ativo
-const APIFY_ACTOR_ID = "nwua9Gu5YrADL7ZDj"; // ID do Robô oficial da sua conta
+const APIFY_TOKEN = "apify_api_UDWkQGlrcl4QVGkkPqfOyvlNuGWvcL0pmUJV"; // Opcional, caso volte a usar o robô
+const APIFY_ACTOR_ID = "nwua9Gu5YrADL7ZDj"; 
 
 // --- DADOS ESTÁTICOS ---
 const NICHES = [
@@ -43,15 +43,17 @@ export default function App() {
   const [profileInitials, setProfileInitials] = useState('GM');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
-  // Meta Semanal State (Padrão inicial de R$ 897,00)
+  // Meta Semanal State
   const [weeklyGoal, setWeeklyGoal] = useState(897);
 
-  // Auxiliares das Abas
+  // Auxiliares das Abas e Módulo de Importação
   const [objectionInputs, setObjectionInputs] = useState({});
   const [objectionOutputs, setObjectionOutputs] = useState({});
   const [loadingObjection, setLoadingObjection] = useState({});
   const [aiToneCommand, setAiToneCommand] = useState('');
   const [isTuningTone, setIsTuningTone] = useState({});
+  const [importedJsonLeads, setImportedJsonLeads] = useState([]);
+  const [isProcessingImport, setIsProcessingImport] = useState(false);
 
   // Carregar dados guardados do LocalStorage
   useEffect(() => {
@@ -103,8 +105,8 @@ export default function App() {
     localStorage.setItem('hunter_weekly_goal', goal.toString());
   };
 
-  const showToast = (msg) => {
-    setToastMessage(msg);
+  const showToast = (msg, isError = false) => {
+    setToastMessage({ text: msg, isError });
     setTimeout(() => setToastMessage(null), 4000);
   };
 
@@ -136,13 +138,12 @@ export default function App() {
   };
 
   // --- HELPER DE FILTRO DE DATA SEMANAL ---
-  // Verifica se uma string de data (formato YYYY-MM-DD) está dentro da semana atual de Junho de 2026
   const isDateInCurrentWeek = (dateStr) => {
     if (!dateStr) return false;
-    const d = new Date(dateStr + "T12:00:00"); // Previne bugs de fuso horário
+    const d = new Date(dateStr + "T12:00:00");
     if (isNaN(d.getTime())) return false;
     
-    const now = new Date("2026-06-22T12:00:00"); // Data de referência da sessão do sistema
+    const now = new Date();
     
     // Início da semana atual (Domingo)
     const startOfWeek = new Date(now);
@@ -157,7 +158,7 @@ export default function App() {
     return d >= startOfWeek && d <= endOfWeek;
   };
 
-  // --- IA ENGINE ---
+  // --- IA ENGINE (PROMOÇÃO DE ABORDAGENS) ---
   const callGeminiAPI = async (prompt, isJson = true) => {
     if (!apiKey) {
       return isJson ? {
@@ -165,10 +166,7 @@ export default function App() {
           { description: "Ausência de otimização orgânica local no Google Maps", severity: "high" },
           { description: "Site inacessível ou sem carregamento móvel otimizado", severity: "medium" }
         ],
-        pitch: "Olá! Notei uma pequena falha no vosso posicionamento no Google Maps que está a afastar clientes. Podemos conversar 5 minutos?",
-        contact_email: "suporte@empresa.com",
-        contact_phone: "+5548999999999",
-        contact_instagram: "@empresa_foco"
+        pitch: "Olá! Notei uma pequena falha no vosso posicionamento no Google Maps que está a afastar clientes. Podemos conversar 5 minutos?"
       } : "Percebo perfeitamente o vosso ponto. No entanto, o objetivo desta análise é puramente preventivo. Conseguimos conversar 5 minutos amanhã?";
     }
     
@@ -193,10 +191,7 @@ export default function App() {
               }
             }
           },
-          pitch: { type: "STRING" },
-          contact_email: { type: "STRING" },
-          contact_phone: { type: "STRING" },
-          contact_instagram: { type: "STRING" }
+          pitch: { type: "STRING" }
         }
       };
     }
@@ -230,7 +225,7 @@ export default function App() {
       const result = await callGeminiAPI(prompt, false);
       setObjectionOutputs(prev => ({ 
         ...prev, 
-        [lead.id]: result || "Entendo perfeitamente o vosso lado. O objetivo deste contacto rápido é apenas mostrar um ponto de conversão no vosso perfil do Google Maps que vos está a fazer perder posições gratuitas. Conseguimos alinhar um papo de 5 minutos?"
+        [lead.id]: result || "Entendo perfeitamente o vosso lado. O objetivo deste contacto rápido é apenas mostrar um ponto de conversão no vosso perfil do Google Maps que vos está a fazer perder posições gratuitas. Conseguimos conversar por WhatsApp 5 minutos?"
       }));
     } catch (e) {
       console.error(e);
@@ -268,139 +263,112 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      showToast("Falha técnica ao ajustar tom com a IA.");
+      showToast("Falha técnica ao ajustar tom com a IA.", true);
     } finally {
       setIsTuningTone(prev => ({ ...prev, [leadId]: false }));
     }
   };
 
-  // --- APIFY SCRAPING ---
-  const runApifyScraper = async (campaign) => {
-    showToast('A despertar o robô de extração do Google Maps...');
-    const input = {
-      searchStringsArray: [campaign.niche],
-      locationQuery: `${campaign.location}, Brazil`,
-      maxCrawledPlacesPerSearch: campaign.quantity,
-      language: "pt-BR",
-      website: "allPlaces",
-      scrapeSocialMediaProfiles: {
-        facebooks: false,
-        instagrams: true,
-        youtubes: false,
-        tiktoks: false,
-        twitters: false
-      }
-    };
+  // --- LEITOR DE FICHEIRO JSON LOCAL ---
+  const handleJsonFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-    try {
-      const runRes = await fetch(`https://api.apify.com/v2/acts/${APIFY_ACTOR_ID}/runs?token=${APIFY_TOKEN}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input)
-      });
-      
-      if (!runRes.ok) throw new Error('Falha na autenticação ou créditos esgotados na conta Apify.');
-      
-      const runData = await runRes.json();
-      const runId = runData.data.id;
-      const datasetId = runData.data.defaultDatasetId;
-
-      let status = "RUNNING";
-      let elapsedAttempts = 0;
-      
-      showToast('Pesquisando listagens no mapa...');
-      
-      while (status === "RUNNING" || status === "READY") {
-        if (elapsedAttempts > 35) throw new Error("Tempo limite de processamento excedido.");
-        await new Promise(r => setTimeout(r, 5000));
-        elapsedAttempts++;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target.result.trim();
+        let parsed = [];
         
-        const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`);
-        const statusData = await statusRes.json();
-        status = statusData.data.status;
-        
-        if (status === "FAILED" || status === "ABORTED") throw new Error("A execução do Apify falhou.");
-      }
-
-      const dataRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_TOKEN}`);
-      const items = await dataRes.json();
-
-      if (!items || items.length === 0) throw new Error("Nenhum estabelecimento encontrado nesta região.");
-
-      const leads = [];
-      showToast(`Extraídos ${items.length} registos. A construir análises comerciais por IA...`);
-
-      for (let i = 0; i < Math.min(items.length, campaign.quantity); i++) {
-        const item = items[i];
-        const name = item.title || item.name || `${campaign.niche} Localizado`;
-        const website = item.website || item.url || "sem site";
-        const phone = item.phone || item.phoneUnformatted || "não listado";
-        const email = item.email || (item.emails && item.emails[0]) || "não listado";
-        const instagram = item.instagram || (item.socialMediaProfiles && item.socialMediaProfiles.instagram) || "não listado";
-        
-        const prompt = `Gere uma análise crítica em formato JSON de 2 vulnerabilidades técnicas do site/Maps para a empresa "${name}" em Florianópolis. Crie também uma abordagem direta de 2 parágrafos amigável em primeira pessoa para enviar por mensagem.`;
-
-        let aiData = await callGeminiAPI(prompt, true);
-        
-        if (!aiData) {
-           aiData = {
-            weaknesses: [{ description: "Perfil de negócio desprovido de links de conversão direta ou otimização de palavras-chave", severity: "high" }],
-            pitch: `Olá pessoal da ${name}, tudo bem? Localizei o vosso estabelecimento nas pesquisas do Google Maps em Florianópolis e notei que estão atrás da concorrência direta por um detalhe de otimização local. Conseguimos conversar por chamada breve amanhã?`,
-            contact_email: email,
-            contact_phone: phone,
-            contact_instagram: instagram
-          };
+        // Verifica se é JSONL (múltiplas linhas independentes) ou JSON padrão
+        if (file.name.endsWith('.jsonl') || (content.includes('\n') && !content.startsWith('['))) {
+          const lines = content.split('\n');
+          for (const line of lines) {
+            if (line.trim()) {
+              parsed.push(JSON.parse(line));
+            }
+          }
+        } else {
+          // Tenta ler como JSON array padrão
+          const jsonParsed = JSON.parse(content);
+          parsed = Array.isArray(jsonParsed) ? jsonParsed : [jsonParsed];
         }
 
-        leads.push({
-          id: generateId(),
-          name,
-          link: website !== "sem site" ? website : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name+' '+campaign.location)}`,
-          ...aiData,
-          notes: '',
-          status: 'não contatado',
-          approachDate: '',
-          conversionDate: '',
-          dealValue: 0
-        });
+        if (parsed.length > 0) {
+          setImportedJsonLeads(parsed);
+          showToast(`Sucesso! ${parsed.length} estabelecimentos carregados para processamento.`);
+        } else {
+          showToast("O ficheiro encontra-se vazio ou sem formato válido.", true);
+        }
+      } catch (err) {
+        console.error(err);
+        showToast("Erro de formatação. Certifique-se de que o ficheiro é JSON ou JSONL válido.", true);
       }
-      
-      return leads;
-
-    } catch (error) {
-      console.error(error);
-      showToast(`Erro na extração: ${error.message}`);
-      throw error;
-    }
+    };
+    reader.readAsText(file);
   };
 
-  const handleCreateCampaign = async (campaignData) => {
+  // --- PROCESSAMENTO DOS LEADS IMPORTADOS ---
+  const handleProcessImportedCampaign = async (campaignData) => {
+    if (importedJsonLeads.length === 0) {
+      showToast("Por favor, selecione primeiro um arquivo JSON para importar.", true);
+      return;
+    }
+
+    setIsProcessingImport(true);
+    showToast("A estruturar a sua nova campanha de prospecção...");
+
+    const newCampaignId = generateId();
+    const leads = [];
+
+    // Mapeamento e enriquecimento inteligente por IA para cada item do JSON importado
+    for (let i = 0; i < importedJsonLeads.length; i++) {
+      const item = importedJsonLeads[i];
+      const name = item.title || item.name || item.companyName || `Empresa Encontrada #${i+1}`;
+      const website = item.website || item.url || item.websiteUrl || "não listado";
+      const phone = item.phone || item.phoneUnformatted || item.phoneNumber || "não listado";
+      const email = item.email || (item.emails && item.emails[0]) || "não listado";
+      const instagram = item.instagram || (item.socialMediaProfiles && item.socialMediaProfiles.instagram) || "não listado";
+
+      const prompt = `Gere uma análise crítica em formato JSON de 2 vulnerabilidades técnicas do site/Maps para a empresa "${name}" em Florianópolis. Crie também uma abordagem direta comercial de 2 parágrafos amigável para enviar por mensagem.`;
+
+      let aiData = await callGeminiAPI(prompt, true);
+      
+      leads.push({
+        id: generateId(),
+        name,
+        link: website !== "não listado" && website !== "N/A" ? website : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name+' '+campaignData.location)}`,
+        weaknesses: aiData?.weaknesses || [
+          { description: "Perfil de negócio desprovido de links de conversão direta ou otimização de palavras-chave", severity: "high" },
+          { description: "Ausência de automação de respostas rápidas no perfil local", severity: "medium" }
+        ],
+        pitch: aiData?.pitch || `Olá pessoal da ${name}, tudo bem? Localizei o vosso perfil nas pesquisas do Google Maps em Florianópolis e notei que estão atrás da concorrência direta por um detalhe de otimização local. Conseguimos conversar por chamada breve amanhã?`,
+        // DADOS REAIS TRAVADOS AQUI, DIRETO DO FICHEIRO:
+        contact_phone: phone,
+        contact_email: email,
+        contact_instagram: instagram,
+        notes: '',
+        status: 'não contatado',
+        approachDate: '',
+        conversionDate: '',
+        dealValue: 0
+      });
+    }
+
     const newCampaign = {
       ...campaignData,
-      id: generateId(),
+      id: newCampaignId,
       date: new Date().toLocaleDateString('pt-BR'),
-      status: 'scraping',
-      leads: []
+      status: 'done',
+      leads: leads
     };
-    
+
     const updatedCampaigns = [newCampaign, ...campaigns];
     saveCampaigns(updatedCampaigns);
+    setIsProcessingImport(false);
+    setImportedJsonLeads([]);
     setCurrentView('dashboard');
-    showToast('A iniciar o mapeamento automatizado de leads...');
-
-    try {
-      const generatedLeads = await runApifyScraper(newCampaign);
-      const finishedCampaigns = updatedCampaigns.map(c => 
-        c.id === newCampaign.id ? { ...c, status: 'done', leads: generatedLeads } : c
-      );
-      saveCampaigns(finishedCampaigns);
-      showToast(`Varredura do fluxo '${newCampaign.name}' concluída.`);
-    } catch (error) {
-      const failedCampaigns = updatedCampaigns.map(c => 
-        c.id === newCampaign.id ? { ...c, status: 'error', leads: [] } : c
-      );
-      saveCampaigns(failedCampaigns);
-    }
+    showToast(`Parabéns! Mapeamento de '${newCampaign.name}' finalizado com ${leads.length} leads.`);
   };
 
   const updateLeadStatus = (campaignId, leadId, newStatus) => {
@@ -425,19 +393,6 @@ export default function App() {
             }
             return l;
           })
-        };
-      }
-      return c;
-    });
-    saveCampaigns(updated);
-  };
-
-  const updateLeadNotes = (campaignId, leadId, notesText) => {
-    const updated = campaigns.map(c => {
-      if (c.id === campaignId) {
-        return {
-          ...c,
-          leads: c.leads.map(l => l.id === leadId ? { ...l, notes: notesText } : l)
         };
       }
       return c;
@@ -573,9 +528,7 @@ export default function App() {
               <div className="p-6">
                 {campaigns.length === 0 ? (
                   <div className="py-12 flex flex-col items-center justify-center text-center">
-                    <div className="p-4 bg-[#18181B] border border-[#27272A] rounded-full text-slate-500 mb-4">
-                      <List size={24} />
-                    </div>
+                    <div className="p-4 bg-[#18181B] border border-[#27272A] rounded-full text-slate-500 mb-4"><List size={24} /></div>
                     <p className="text-white font-semibold text-base">A sua base de dados local encontra-se vazia.</p>
                     <p className="text-sm text-[#9CA3AF] mt-1 max-w-sm">Abra a aba de Fluxos e inicie uma operação de prospecção comercial.</p>
                   </div>
@@ -590,13 +543,7 @@ export default function App() {
                             <span className="text-xs text-[#9CA3AF] font-medium">{c.niche} • {c.location} • {c.leads?.length || 0} leads</span>
                           </div>
                           <div className="flex items-center gap-3">
-                            {c.status === 'scraping' ? (
-                              <span className="text-xs bg-amber-500/10 text-amber-500 border border-amber-500/20 px-3 py-1 rounded-full animate-pulse">Extraindo...</span>
-                            ) : c.status === 'error' ? (
-                              <span className="text-xs bg-rose-500/10 text-rose-500 border border-rose-500/20 px-3 py-1 rounded-full">Erro</span>
-                            ) : (
-                              <span className="text-xs bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-3 py-1 rounded-full font-bold">Mapeado</span>
-                            )}
+                            <span className="text-xs bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-3 py-1 rounded-full font-bold">Importado</span>
                             <button 
                               onClick={() => { setActiveCampaignId(c.id); setCurrentView('campaign'); }}
                               className="p-2 hover:bg-[#18181B] text-[#9CA3AF] hover:text-white rounded-lg transition-all border border-[#27272A]"
@@ -630,7 +577,7 @@ export default function App() {
               
               <div className="space-y-2">
                 <p className="text-xs text-[#9CA3AF] font-medium leading-relaxed">
-                  Acompanha as suas baixas e receita faturada na semana atual (21 a 27 de Junho de 2026).
+                  Acompanha as suas baixas e receita faturada na semana atual.
                 </p>
                 <div className="flex flex-col gap-1">
                   <span className="text-3xl font-extrabold text-emerald-400 tracking-tight">{formatCurrency(weeklyRevenue)}</span>
@@ -802,7 +749,7 @@ export default function App() {
     const [selectedLeadForTone, setSelectedLeadForTone] = useState(null);
 
     const getWhatsAppLink = (phoneNum, pitchText) => {
-      if (!phoneNum || phoneNum === 'não achou' || phoneNum === 'não encontrado' || phoneNum === 'Não informado') return null;
+      if (!phoneNum || phoneNum === 'não achou' || phoneNum === 'não encontrado' || phoneNum === 'Não listado') return null;
       const cleanPhone = phoneNum.replace(/\D/g, '');
       const finalPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
       return `https://api.whatsapp.com/send?phone=${finalPhone}&text=${encodeURIComponent(pitchText)}`;
@@ -817,7 +764,7 @@ export default function App() {
 
         {allLeads.length === 0 ? (
           <div className="border border-[#27272A] bg-[#09090B] rounded-3xl p-12 text-center text-[#9CA3AF] font-medium">
-            Nenhum roteiro comercial disponível. Ative uma varredura para que a IA crie abordagens.
+            Nenhum roteiro comercial disponível. Importe dados na aba Fluxos.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -827,7 +774,7 @@ export default function App() {
                   <div className="flex justify-between items-start">
                     <div>
                       <h3 className="font-bold text-white text-lg">{lead.name}</h3>
-                      <span className="text-xs text-[#9CA3AF] font-semibold">{lead.phone}</span>
+                      <span className="text-xs text-[#9CA3AF] font-semibold">{lead.contact_phone}</span>
                     </div>
                     <button 
                       onClick={() => setSelectedLeadForTone(lead.id === selectedLeadForTone?.id ? null : lead)}
@@ -850,7 +797,7 @@ export default function App() {
                     <div className="flex gap-2">
                       <input 
                         type="text" 
-                        placeholder="Ex: Mudar para um tom mais agressivo e curto..."
+                        placeholder="Ex: Mudar para um tom mais agressivo..."
                         className="flex-1 px-4 py-2 bg-[#09090B] border border-[#27272A] rounded-xl text-xs text-white focus:outline-none focus:border-[#C5A27D]"
                         value={aiToneCommand}
                         onChange={e => setAiToneCommand(e.target.value)}
@@ -873,9 +820,9 @@ export default function App() {
                   >
                     <Copy size={12} /> Copiar Script
                   </button>
-                  {getWhatsAppLink(lead.phone, lead.pitch) && (
+                  {getWhatsAppLink(lead.contact_phone, lead.pitch) && (
                     <a 
-                      href={getWhatsAppLink(lead.phone, lead.pitch)}
+                      href={getWhatsAppLink(lead.contact_phone, lead.pitch)}
                       target="_blank"
                       rel="noreferrer"
                       className="flex-1 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-xl text-xs font-bold border border-emerald-500/20 transition-all flex items-center justify-center gap-1.5 text-center"
@@ -893,29 +840,58 @@ export default function App() {
   };
 
   const FlowsView = () => {
-    const [formData, setFormData] = useState({ name: '', niche: NICHES[0].name, location: 'Florianópolis - SC', quantity: 5 });
+    const [formData, setFormData] = useState({ name: '', niche: NICHES[0].name, location: 'Florianópolis - SC' });
 
-    const submit = (e) => {
+    const handleFormSubmit = (e) => {
       e.preventDefault();
-      if (!formData.name) return showToast("Por favor dê um nome à sua campanha.");
-      handleCreateCampaign(formData);
+      if (!formData.name) return showToast("Por favor, dê um nome à sua campanha.", true);
+      if (importedJsonLeads.length === 0) return showToast("Por favor, carregue um ficheiro JSON antes de salvar.", true);
+      handleProcessImportedCampaign(formData);
     };
 
     return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in">
-        {/* Criador de Fluxo */}
+        {/* Criador de Fluxo por Importação */}
         <div className="lg:col-span-1 border border-[#27272A] bg-[#09090B] rounded-3xl p-6 space-y-6 self-start">
           <div>
-            <h2 className="text-xl font-bold text-white">Novo Mapeamento</h2>
-            <p className="text-xs text-[#9CA3AF] mt-1">Extraia contactos locais de Florianópolis com a sua conta Apify e IA.</p>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <Upload size={20} className="text-[#C5A27D]" /> Importar Leads
+            </h2>
+            <p className="text-xs text-[#9CA3AF] mt-1">Carregue a sua lista de prospecção extraída em JSON para estruturação inteligente via IA.</p>
           </div>
 
-          <form onSubmit={submit} className="space-y-5">
+          <form onSubmit={handleFormSubmit} className="space-y-5">
+            {/* File Upload Zone */}
+            <div className="border border-dashed border-[#27272A] hover:border-[#C5A27D] bg-[#18181B] rounded-2xl p-6 text-center transition-all cursor-pointer relative group">
+              <input 
+                type="file" 
+                accept=".json,.jsonl"
+                onChange={handleJsonFileChange}
+                className="absolute inset-0 opacity-0 cursor-pointer z-10"
+              />
+              <div className="space-y-3 flex flex-col items-center">
+                <div className="p-3 bg-[#09090B] border border-[#27272A] rounded-xl text-slate-400 group-hover:text-[#C5A27D] group-hover:border-[#C5A27D] transition-all">
+                  <FileJson size={24} />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-slate-300 block">Carregar ficheiro JSON ou JSONL</span>
+                  <span className="text-[10px] text-[#9CA3AF] block mt-1">Arraste ou clique para selecionar</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Ficheiro carregado indicator */}
+            {importedJsonLeads.length > 0 && (
+              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs p-3.5 rounded-xl font-bold flex items-center gap-2">
+                <CheckCircle2 size={16} /> {importedJsonLeads.length} leads prontos para estruturar!
+              </div>
+            )}
+
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Identificação</label>
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Nome da Campanha</label>
               <input 
                 type="text" 
-                placeholder="Ex: Clínicas Odontológicas Coqueiros"
+                placeholder="Ex: Nutricionistas Florianópolis Centro"
                 className="w-full px-4 py-3 bg-[#18181B] border border-[#27272A] rounded-xl text-sm text-white focus:outline-none focus:border-[#C5A27D] transition-colors"
                 value={formData.name}
                 onChange={e => setFormData({...formData, name: e.target.value})}
@@ -924,9 +900,9 @@ export default function App() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Nicho Alvo</label>
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Nicho Principal</label>
               <select 
-                className="w-full px-4 py-3 bg-[#18181B] border border-[#27272A] rounded-xl text-sm text-white focus:outline-none focus:border-[#C5A27D] transition-colors"
+                className="w-full px-4 py-3 bg-[#18181B] border border-[#27272A] rounded-xl text-sm text-white focus:outline-none focus:border-[#C5A27D] transition-colors cursor-pointer"
                 value={formData.niche}
                 onChange={e => setFormData({...formData, niche: e.target.value})}
               >
@@ -935,20 +911,10 @@ export default function App() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Volume</label>
-              <select 
-                className="w-full px-4 py-3 bg-[#18181B] border border-[#27272A] rounded-xl text-sm text-white focus:outline-none focus:border-[#C5A27D] transition-colors"
-                value={formData.quantity}
-                onChange={e => setFormData({...formData, quantity: Number(e.target.value)})}
-              >
-                {[5, 10, 15, 20, 30].map(q => <option key={q} value={q}>{q} leads</option>)}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Localização do Alvo</label>
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Localização de Referência</label>
               <input 
                 type="text" 
+                placeholder="Florianópolis - SC"
                 className="w-full px-4 py-3 bg-[#18181B] border border-[#27272A] rounded-xl text-sm text-white focus:outline-none focus:border-[#C5A27D] transition-colors"
                 value={formData.location}
                 onChange={e => setFormData({...formData, location: e.target.value})}
@@ -958,9 +924,18 @@ export default function App() {
 
             <button 
               type="submit" 
-              className="w-full py-3.5 bg-[#C5A27D] hover:bg-[#b5926d] text-black text-sm font-bold rounded-xl shadow-lg transition-all"
+              disabled={isProcessingImport || importedJsonLeads.length === 0}
+              className="w-full py-3.5 bg-[#C5A27D] hover:bg-[#b5926d] text-black text-sm font-bold rounded-xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              Criar e Varrear Alvos
+              {isProcessingImport ? (
+                <>
+                  <RefreshCw size={16} className="animate-spin" /> Processando com IA...
+                </>
+              ) : (
+                <>
+                  <Plus size={16} /> Salvar e Gerar Relatórios
+                </>
+              )}
             </button>
           </form>
         </div>
@@ -968,7 +943,7 @@ export default function App() {
         {/* Histórico Geral de Fluxos */}
         <div className="lg:col-span-2 border border-[#27272A] bg-[#09090B] rounded-3xl p-6 space-y-6">
           <div>
-            <h2 className="text-xl font-bold text-white">Histórico de Campanhas de Varredura</h2>
+            <h2 className="text-xl font-bold text-white">Frentes de Prospecção Ativas</h2>
             <p className="text-xs text-[#9CA3AF] mt-1">Visualize todos os fluxos disparados, dados obtidos e status operacional.</p>
           </div>
 
@@ -990,16 +965,12 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
-                      c.status === 'done' ? 'bg-emerald-500/10 text-emerald-400' :
-                      c.status === 'scraping' ? 'bg-amber-500/10 text-amber-400 animate-pulse' :
-                      'bg-rose-500/10 text-rose-400'
-                    }`}>
-                      {c.status === 'done' ? `${c.leads?.length || 0} leads` : c.status === 'scraping' ? 'Scraping' : 'Falhou'}
+                    <span className="px-2.5 py-1 rounded-full text-xs font-bold border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                      {c.leads?.length || 0} leads ativos
                     </span>
                     <button 
                       onClick={() => deleteCampaign(c.id)}
-                      className="p-2 bg-[#09090B] border border-[#27272A] hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 rounded-lg transition-all"
+                      className="p-2 bg-[#09090B] border border-[#27272A] hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 rounded-lg transition-all"
                       title="Apagar Campanha"
                     >
                       <Trash2 size={15} />
@@ -1053,13 +1024,8 @@ export default function App() {
                 { step: '3. Convertidas (Sucesso)', count: convertedLeads, pct: contactedLeads > 0 ? Math.round((convertedLeads / contactedLeads) * 100) : 0, color: 'bg-emerald-500' }
               ].map((step, idx) => (
                 <div key={idx} className="space-y-1">
-                  <div className="flex justify-between text-xs font-semibold text-[#9CA3AF]">
-                    <span>{step.step}</span>
-                    <span>{step.count} ({step.pct}%)</span>
-                  </div>
-                  <div className="w-full bg-[#18181B] border border-[#27272A] h-2.5 rounded-full overflow-hidden">
-                    <div className={`${step.color} h-full rounded-full transition-all`} style={{ width: `${step.pct}%` }} />
-                  </div>
+                  <div className="flex justify-between text-xs font-semibold text-[#9CA3AF]"><span>{step.step}</span><span>{step.count} ({step.pct}%)</span></div>
+                  <div className="w-full bg-[#18181B] border border-[#27272A] h-2.5 rounded-full overflow-hidden"><div className={`${step.color} h-full rounded-full transition-all`} style={{ width: `${step.pct}%` }} /></div>
                 </div>
               ))}
             </div>
@@ -1077,10 +1043,7 @@ export default function App() {
                 {statsByNiche.map((sn, idx) => (
                   <div key={idx} className="flex justify-between items-center text-sm font-semibold bg-[#18181B] p-3 rounded-xl border border-[#27272A]">
                     <span className="text-white font-bold">{sn.name}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-[#9CA3AF]">{sn.converted} de {sn.total} leads</span>
-                      <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-1 rounded-md text-xs">{sn.rate}% Conv.</span>
-                    </div>
+                    <div className="flex items-center gap-3"><span className="text-xs text-[#9CA3AF]">{sn.converted} de {sn.total} leads</span><span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-1 rounded-md text-xs">{sn.rate}% Conv.</span></div>
                   </div>
                 ))}
               </div>
@@ -1118,14 +1081,8 @@ export default function App() {
             { label: 'Ticket Médio', value: formatCurrency(averageTicket), desc: 'Valor médio por contrato assinado', icon: Clipboard, color: 'text-indigo-400' }
           ].map((card, i) => (
             <div key={i} className="border border-[#27272A] bg-[#09090B] p-6 rounded-2xl flex justify-between items-start">
-              <div className="space-y-3">
-                <span className="text-xs uppercase tracking-wider font-semibold text-slate-500">{card.label}</span>
-                <p className={`text-3xl font-bold tracking-tight ${card.color}`}>{card.value}</p>
-                <p className="text-xs text-[#9CA3AF]">{card.desc}</p>
-              </div>
-              <div className="p-3 bg-[#18181B] border border-[#27272A] rounded-xl text-slate-400">
-                <card.icon size={20} />
-              </div>
+              <div className="space-y-3"><span className="text-xs uppercase tracking-wider font-semibold text-slate-500">{card.label}</span><p className={`text-3xl font-bold tracking-tight ${card.color}`}>{card.value}</p><p className="text-xs text-[#9CA3AF]">{card.desc}</p></div>
+              <div className="p-3 bg-[#18181B] border border-[#27272A] rounded-xl text-slate-400"><card.icon size={20} /></div>
             </div>
           ))}
         </div>
@@ -1134,40 +1091,26 @@ export default function App() {
         <div className="border border-[#27272A] bg-[#09090B] rounded-2xl overflow-hidden">
           <div className="p-6 border-b border-[#27272A] flex items-center justify-between">
             <h2 className="text-base font-semibold text-white">Registos de Baixas (Contratos Assinados)</h2>
-            <span className="text-xs font-semibold text-slate-400 bg-[#18181B] border border-[#27272A] px-3 py-1 rounded-full">
-              {closedDeals.length} conversões
-            </span>
+            <span className="text-xs font-semibold text-slate-400 bg-[#18181B] border border-[#27272A] px-3 py-1 rounded-full">{closedDeals.length} conversões</span>
           </div>
 
           <table className="w-full text-left font-sans text-sm">
             <thead>
               <tr className="text-[#9CA3AF] font-semibold text-xs uppercase border-b border-[#27272A] bg-[#09090B]">
-                <th className="p-4 pl-6">Cliente</th>
-                <th className="p-4">Origem</th>
-                <th className="p-4 text-center">Data da Abordagem</th>
-                <th className="p-4 text-center">Data do Fechamento</th>
-                <th className="p-4 text-right pr-6">Valor do Contrato</th>
+                <th className="p-4 pl-6">Cliente</th><th className="p-4">Origem</th><th className="p-4 text-center">Data da Abordagem</th><th className="p-4 text-center">Data do Fechamento</th><th className="p-4 text-right pr-6">Valor do Contrato</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#27272A]">
               {closedDeals.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="p-12 text-center text-[#9CA3AF] font-medium">Nenhum contrato fechado ainda. Dê baixa em algum lead como "Convertido".</td>
-                </tr>
+                <tr><td colSpan="5" className="p-12 text-center text-[#9CA3AF] font-medium">Nenhum contrato fechado ainda. Dê baixa em algum lead como "Convertido".</td></tr>
               ) : (
                 closedDeals.map(lead => (
                   <tr key={lead.id} className="hover:bg-[#18181B] transition-colors">
                     <td className="p-4 pl-6 font-bold text-white">{lead.name}</td>
                     <td className="p-4 text-slate-400">{lead.campaignName}</td>
-                    <td className="p-4 text-center text-slate-300 font-medium">
-                      {lead.approachDate ? new Date(lead.approachDate + "T12:00:00").toLocaleDateString('pt-BR') : "—"}
-                    </td>
-                    <td className="p-4 text-center text-[#C5A27D] font-bold">
-                      {lead.conversionDate ? new Date(lead.conversionDate + "T12:00:00").toLocaleDateString('pt-BR') : "—"}
-                    </td>
-                    <td className="p-4 text-right pr-6 font-bold text-emerald-400">
-                      {formatCurrency(lead.dealValue || 1500)}
-                    </td>
+                    <td className="p-4 text-center text-slate-300 font-medium">{lead.approachDate ? new Date(lead.approachDate + "T12:00:00").toLocaleDateString('pt-BR') : "—"}</td>
+                    <td className="p-4 text-center text-[#C5A27D] font-bold">{lead.conversionDate ? new Date(lead.conversionDate + "T12:00:00").toLocaleDateString('pt-BR') : "—"}</td>
+                    <td className="p-4 text-right pr-6 font-bold text-emerald-400">{formatCurrency(lead.dealValue || 1500)}</td>
                   </tr>
                 ))
               )}
@@ -1187,7 +1130,7 @@ export default function App() {
 
     const getStatusStyle = (status) => {
       if (status === 'convertido') return 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-bold';
-      if (status === 'contatado') return 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-bold';
+      if (status === 'contatado') return 'bg-[#C5A27D]/10 text-[#C5A27D] border border-[#C5A27D]/20 font-bold';
       return 'bg-[#18181B] text-[#9CA3AF] border border-[#27272A] font-bold';
     };
 
@@ -1208,7 +1151,7 @@ export default function App() {
     });
 
     const getWhatsAppLink = (phoneNum, pitchText) => {
-      if (!phoneNum || phoneNum === 'não achou' || phoneNum === 'não encontrado' || phoneNum === 'Não informado') return null;
+      if (!phoneNum || phoneNum === 'não achou' || phoneNum === 'não encontrado' || phoneNum === 'Não listado') return null;
       const cleanPhone = phoneNum.replace(/\D/g, '');
       const finalPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
       return `https://api.whatsapp.com/send?phone=${finalPhone}&text=${encodeURIComponent(pitchText)}`;
@@ -1245,11 +1188,11 @@ export default function App() {
             <span className="text-xs uppercase tracking-wider text-slate-500 font-bold">Histórico do Google Maps</span>
             <h1 className="text-2xl font-bold text-white mt-1">{campaign.name}</h1>
             <div className="flex gap-2 mt-4 text-xs font-semibold text-slate-300">
-              <span className="bg-white/5 px-3 py-1.5 rounded-lg">{campaign.niche}</span>
-              <span className="bg-white/5 px-3 py-1.5 rounded-lg flex items-center gap-1">
+              <span className="bg-[#18181B] border border-[#27272A] px-3 py-1.5 rounded-lg">{campaign.niche}</span>
+              <span className="bg-[#18181B] border border-[#27272A] px-3 py-1.5 rounded-lg flex items-center gap-1">
                 <MapPin size={12} /> {campaign.location}
               </span>
-              <span className="bg-white/5 px-3 py-1.5 rounded-lg text-[#C5A27D]">{(campaign.leads || []).length} leads mapeados</span>
+              <span className="bg-[#18181B] border border-[#27272A] px-3 py-1.5 rounded-lg text-[#C5A27D]">{(campaign.leads || []).length} leads mapeados</span>
             </div>
           </div>
         </div>
@@ -1319,12 +1262,12 @@ export default function App() {
 
                 {/* Objection Helper */}
                 <div className="pt-4 border-t border-[#27272A] space-y-3">
-                  <span className="text-xs uppercase font-bold text-slate-400 tracking-wider block">Módulo de Objeções</span>
+                  <span className="text-xs uppercase font-bold text-slate-500 tracking-wider block">Módulo de Objeções</span>
                   <div className="flex gap-2">
                     <input 
                       type="text" 
                       placeholder="Ex: 'Já tenho alguém que cuida de tudo'..."
-                      className="flex-grow px-4 py-2.5 bg-[#070a12] border border-[#27272A] rounded-xl text-slate-200 text-sm focus:outline-none"
+                      className="flex-grow px-4 py-2.5 bg-[#18181B] border border-[#27272A] rounded-xl text-white text-sm focus:outline-none focus:border-[#C5A27D]"
                       value={objectionInputs[lead.id] || ''}
                       onChange={e => setObjectionInputs(prev => ({ ...prev, [lead.id]: e.target.value }))}
                     />
@@ -1339,8 +1282,7 @@ export default function App() {
 
                   {objectionOutputs[lead.id] && (
                     <div className="bg-[#C5A27D]/10 border border-[#C5A27D]/30 p-4 rounded-xl text-sm text-[#C5A27D] relative leading-relaxed">
-                      <strong className="text-xs uppercase tracking-wider block mb-1">Roteiro Sugerido:</strong>
-                      <p>"{objectionOutputs[lead.id]}"</p>
+                      <strong className="text-xs uppercase tracking-wider block mb-1">Roteiro Sugerido:</strong><p>"{objectionOutputs[lead.id]}"</p>
                       <button 
                         onClick={() => copyToClipboard(objectionOutputs[lead.id], `obj-${lead.id}`)}
                         className="absolute top-3 right-3 p-1.5 bg-[#09090B] border border-[#27272A] rounded-lg"
@@ -1354,8 +1296,6 @@ export default function App() {
 
               {/* Contacts Panel & Funnel */}
               <div className="w-full md:w-72 flex flex-col justify-between border-t md:border-t-0 md:border-l border-[#27272A] pt-6 md:pt-0 md:pl-6 space-y-6">
-                
-                {/* Canais e Links */}
                 <div className="space-y-4">
                   <span className="text-xs uppercase font-bold text-slate-500 tracking-wider">Canais de Contato</span>
                   <div className="space-y-2">
@@ -1381,39 +1321,35 @@ export default function App() {
                 {/* CONTROLO DIRETO DE CRM (DATA E VALOR) */}
                 {(lead.status === 'contatado' || lead.status === 'convertido') && (
                   <div className="border border-[#27272A] bg-[#18181B]/50 p-4 rounded-xl space-y-3">
-                    <span className="text-xs uppercase font-bold text-slate-500 tracking-wider flex items-center gap-1">
-                      <Calendar size={12} /> Gestão CRM
-                    </span>
-                    
+                    <span className="text-xs uppercase font-bold text-slate-500 tracking-wider flex items-center gap-1"><Calendar size={12} /> Gestão CRM</span>
                     <div className="space-y-2">
                       <div>
                         <label className="text-[10px] text-slate-400 font-semibold block mb-1">Data de Abordagem</label>
                         <input 
-                          type="date"
-                          className="w-full bg-[#09090B] border border-[#27272A] text-slate-300 text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-[#C5A27D]"
-                          value={lead.approachDate || ''}
-                          onChange={(e) => updateLeadCrmField(campaign.id, lead.id, 'approachDate', e.target.value)}
+                          type="date" 
+                          className="w-full bg-[#09090B] border border-[#27272A] text-slate-300 text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-[#C5A27D]" 
+                          value={lead.approachDate || ''} 
+                          onChange={(e) => updateLeadCrmField(campaign.id, lead.id, 'approachDate', e.target.value)} 
                         />
                       </div>
-
                       {lead.status === 'convertido' && (
                         <>
                           <div>
                             <label className="text-[10px] text-slate-400 font-semibold block mb-1">Data da Baixa (Fechamento)</label>
                             <input 
-                              type="date"
-                              className="w-full bg-[#09090B] border border-[#27272A] text-[#C5A27D] text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-[#C5A27D]"
-                              value={lead.conversionDate || ''}
-                              onChange={(e) => updateLeadCrmField(campaign.id, lead.id, 'conversionDate', e.target.value)}
+                              type="date" 
+                              className="w-full bg-[#09090B] border border-[#27272A] text-[#C5A27D] text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-[#C5A27D]" 
+                              value={lead.conversionDate || ''} 
+                              onChange={(e) => updateLeadCrmField(campaign.id, lead.id, 'conversionDate', e.target.value)} 
                             />
                           </div>
                           <div>
                             <label className="text-[10px] text-slate-400 font-semibold block mb-1">Valor do Fechamento (R$)</label>
                             <input 
-                              type="number"
-                              className="w-full bg-[#09090B] border border-[#27272A] text-emerald-400 text-xs px-2.5 py-1.5 rounded-lg font-bold focus:outline-none focus:border-[#C5A27D]"
-                              value={lead.dealValue || ''}
-                              onChange={(e) => updateLeadCrmField(campaign.id, lead.id, 'dealValue', Number(e.target.value))}
+                              type="number" 
+                              className="w-full bg-[#09090B] border border-[#27272A] text-emerald-400 text-xs px-2.5 py-1.5 rounded-lg font-bold focus:outline-none focus:border-[#C5A27D]" 
+                              value={lead.dealValue || ''} 
+                              onChange={(e) => updateLeadCrmField(campaign.id, lead.id, 'dealValue', Number(e.target.value))} 
                             />
                           </div>
                         </>
@@ -1607,8 +1543,8 @@ export default function App() {
       {toastMessage && (
         <div className="fixed bottom-8 right-8 z-50 bg-[#18181B] text-white p-4 rounded-2xl shadow-2xl font-bold text-sm max-w-sm border border-[#27272A] animate-in slide-in-from-right flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#C5A27D] animate-pulse" />
-            <span>{toastMessage}</span>
+            <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${toastMessage.isError ? 'bg-rose-500' : 'bg-[#C5A27D]'}`} />
+            <span>{toastMessage.text}</span>
           </div>
           <X className="cursor-pointer text-slate-400 hover:text-white transition-colors" size={16} onClick={() => setToastMessage(null)} />
         </div>
